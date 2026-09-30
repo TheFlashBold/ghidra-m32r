@@ -72,17 +72,13 @@ define token data16 (16)
 ;
 
 macro setAddFlags(op1,op2) {
-	#$(C_flag) = carry(op1,op2);
-	$(C) = carry(op1,op2);
+	$(C) = scarry(op1,op2);
+	CBR = zext(scarry(op1,op2));
 }
 
 REL8:		reloc				is	rel8	[ reloc = (inst_start & 0xFFFFFFFC) + (rel8 << 2); ] { export *:4 reloc; }
 REL16:		reloc				is	rel16	[ reloc = (inst_start & 0xFFFFFFFC) + (rel16 << 2); ] { export *:4 reloc; }
 REL24:		reloc				is	pcdisp24 [ reloc = (inst_start & 0xFFFFFFFC) + (pcdisp24 << 2); ] { export *:4 reloc; }
-FPREL:		rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export *:4 rel; }
-FPREL_1:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export *:1 rel; }
-FPREL_2:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export *:2 rel; }
-FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 
 
 
@@ -95,11 +91,6 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 }
 
 # hack to show the relative offset to FP
-:ADD3	Rdest, "fp("FP_ADDRESS")"		is op1=8 & Rdest; op3=10 & Rsrc=13; FP_ADDRESS {
-	Rdest = FP_ADDRESS;
-}
-
-
 :ADDI	Rdest, "#"simm8			is op1=4 & Rdest; simm8 {
 	#Rdest = Rdest + sext(simm8:1);
 	Rdest = Rdest + simm8;
@@ -116,13 +107,12 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 }
 
 :ADDX	Rdest, Rsrc				is op1=0 & Rdest; op3=9 & Rsrc {
-	local tmp = Rdest + Rsrc;
-	#local tmp2 = tmp + zext($(C_flag));
-	local tmp2 = tmp + zext($(C));
-	#$(C_flag) = (carry(Rdest, Rsrc) | carry(tmp, tmp2));
-	$(C) = (carry(Rdest, Rsrc) | carry(tmp, tmp2));
-	CBR = zext(carry(Rdest, Rsrc) | carry(tmp, tmp2));
-	Rdest = Rdest + Rsrc + CBR;
+	local cin:4 = zext($(C));
+	local t:4 = Rdest + Rsrc;
+	local c = carry(Rdest, Rsrc) | carry(t, cin);
+	Rdest = t + cin;
+	$(C) = c;
+	CBR = zext(c);
 }
 
 :AND	Rdest, Rsrc				is op1=0 & Rdest; op3=12 & Rsrc {
@@ -148,10 +138,6 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	local value = *:1 address & ~(1 << (7 - bitpos));
 	#*:1 address = value:1;
 	*:1 address = value;
-}
-
-:BCLR	"#"bitpos,"@fp("FPREL_1")"	is op1=10 & op2_1=0 & bitpos; op3=7 & Rsrc=13; FPREL_1 {
-	FPREL_1 = (FPREL_1) & ~(1 << (7 - bitpos));
 }
 
 :BEQ	Rsrc1, Rsrc2, REL16		is op1=11 & Rsrc1; op3=0 & Rsrc2; REL16 {
@@ -225,10 +211,6 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	*address = *:1 address | 1 << (7 - bitpos);
 }
 
-:BSET	"#"bitpos, "@fp("FPREL_1")" 	is op1=10 & op2_1=0 & bitpos; op3=6 & Rsrc=13; FPREL_1 {
-	FPREL_1 = FPREL_1 | 1 << (7-bitpos);
-}
-
 :BTST	"#"bitpos, Rsrc			is op1=0 & op2_1=0 & bitpos; op3=15 & Rsrc {
 	#$(C_flag) = (((Rsrc >> (7 - bitpos)) & 1) == 0);
 	# the way below seems to help Ghidra's decompiler, especially when using ENUM.
@@ -259,10 +241,10 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	CBR = zext(Rsrc1 < Rsrc2);
 }
 
-:CMPUI	Rsrc, "#"imm16			is op12=0x80; op3=5 & Rsrc; imm16 {
-	#$(C_flag) = (Rsrc < imm16);
-	$(C) = (Rsrc < imm16);
-	CBR = zext(Rsrc < imm16);
+:CMPUI	Rsrc, "#"simm16			is op12=0x80; op3=5 & Rsrc; simm16 {
+	local imm:4 = simm16;
+	$(C) = (Rsrc < imm);
+	CBR = zext(Rsrc < imm);
 }
 
 :DIV	Rdest, Rsrc				is op1=9 & Rdest; Rsrc & op3 = 0; imm16 = 0 {
@@ -322,11 +304,6 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	Rdest = *(Rsrc + rel16);
 }
 
-:LD		Rdest,"@fp("FPREL")"	is op1=10 & Rdest; Rsrc=13 & op3=12; FPREL {
-	#Rdest = *(FPREL);
-	Rdest = FPREL;
-}
-
 :LD24	Rdest,"#"imm24			is op1=0xE & Rdest; imm24 {
 	Rdest = zext(imm24:3);
 }
@@ -339,16 +316,12 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	Rdest = sext(*:1 (Rsrc + rel16));
 }
 
-:LDB	Rdest,"@fp("FPREL_1")"	is op1=10 & Rdest; op3=8 & Rsrc=13; FPREL_1 {
-	Rdest = sext(FPREL_1);
-}
-
 :LDH	Rdest,"@"Rsrc			is op1=2 & Rdest; op3=10 & Rsrc {
 	Rdest = sext(*:2 Rsrc);
 }
 
 :LDH	Rdest, "@("rel16, Rsrc")"	is op1=10 & Rdest; op3=10 & Rsrc; rel16 {
-	Rdest = sext(*:2 Rsrc + rel16);
+	Rdest = sext(*:2 (Rsrc + rel16));
 }
 
 :LDI	Rdest,"#"simm8			is op1=6 & Rdest; simm8 {
@@ -370,20 +343,12 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	Rdest = zext(*:1 (Rsrc + rel16));
 }
 
-:LDUB	Rdest,"@"FPREL_1		is op1=10 & Rdest; Rsrc=13 & op3=9; FPREL_1 {
-	Rdest = zext(FPREL_1);
-}
-
 :LDUH	Rdest,"@("Rsrc")"		is op1=2 & Rdest; Rsrc & op3=11 {
 	Rdest = zext(*:2 Rsrc);
 }
 
 :LDUH	Rdest,"@("rel16,Rsrc")"	is op1=10 & Rdest; Rsrc & op3=11; rel16 {
 	Rdest = zext(*:2 (Rsrc + rel16));
-}
-
-:LDUH	Rdest,"@fp("FPREL_2")"	is op1=10 & Rdest; Rsrc=13 & op3=11; FPREL_2 {
-	Rdest = zext(FPREL_2);
 }
 
 :LOCK	Rdest, "@"Rsrc			is op1=2 & Rdest; op3=13 & Rsrc {
@@ -426,8 +391,7 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 #:MVTACHI
 #:MVTACLO
 
-:MVTC	Rsrc,CRdest				is op1=1 & CRdest; Rsrc {
-	write_creg(Rsrc, CRdest);
+:MVTC	Rsrc,CRdest				is op1=1 & CRdest; op3=10 & Rsrc {
 	CRdest = Rsrc;
 	
 }
@@ -537,20 +501,12 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 :ST		Rsrc1,"@("rel16,Rsrc2")"	is op1=10 & Rsrc1; Rsrc2 & op3=4; rel16 {
 	*(Rsrc2 + rel16) = Rsrc1;
 }
-:ST		Rsrc1,"@fp("FPREL")"	is op1=10 & Rsrc1; op3=4 & Rsrc2=13; FPREL {
-	FPREL = Rsrc1;
-}
-
 :STB	Rsrc1,"@"Rsrc2			is (op1=2) & Rsrc1; Rsrc2 & op3=0 {
 	*:1 Rsrc2 = Rsrc1:1; # & 0xFF;
 }
 
 :STB	Rsrc1,"@("rel16,Rsrc2")"	is op1=10 & Rsrc1; op3=0 & Rsrc2; rel16 {
 	*:1 (Rsrc2 + rel16) = Rsrc1:1;
-}
-
-:STB	Rsrc1,"@fp("FPREL_1")"	is op1=10 & Rsrc1; op3=0 & Rsrc2=13; FPREL_1 {
-	FPREL_1 = Rsrc1:1;
 }
 
 :STH	Rsrc1,"@"Rsrc2			is op1=2 & Rsrc1; Rsrc2 & op3=2 {
@@ -566,10 +522,6 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	*:2 (Rsrc2 + rel16) = Rsrc1:2;
 }
 
-:STH	Rsrc1,"@fp("FPREL_2")"	is op1=10 & Rsrc1; Rsrc2=13 & op3=2; FPREL_2 {
-	FPREL_2 = Rsrc1:2;
-}
-
 :SUB	Rdest,Rsrc				is op1=0 & Rdest; op3=2 & Rsrc {
 	Rdest = Rdest - Rsrc;
 }
@@ -581,12 +533,13 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 	Rdest = Rdest - Rsrc;
 }
 
-:SUBX	Rdest, Rsrc		is op1=0 & Rdest; op3=1 & Rsrc { #fix
-	# This is incorrect and needs to have C flag added for borrow
-	Rdest = Rdest - Rsrc;
-	#$(C_flag) = sborrow(Rdest, Rsrc);
-	$(C) = sborrow(Rdest, Rsrc);
-	CBR = zext(sborrow(Rdest, Rsrc));
+:SUBX	Rdest, Rsrc		is op1=0 & Rdest; op3=1 & Rsrc {
+	local cin:4 = zext($(C));
+	local t:4 = Rdest - Rsrc;
+	local b = (Rdest < Rsrc) | (t < cin);
+	Rdest = t - cin;
+	$(C) = b;
+	CBR = zext(b);
 }
 
 :TRAP	"#"op4					is op12=0x10; op3=15 & op4 {
@@ -609,3 +562,23 @@ FP_ADDRESS:	rel					is	rel16	[ rel = rel16 + 0x80c000; ] { export &:4 rel; }
 :XOR3	Rdest,Rsrc,"#"imm16		is op1=8 & Rdest; op3=13 & Rsrc; imm16 {
 	Rdest = Rsrc ^ imm16;
 }
+
+# ---- DSP / accumulator instructions (added) ----
+define pcodeop mul_hi16;
+define pcodeop mul_lo16;
+define pcodeop round_acc;
+:MULHI	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=0 & Rsrc2 { ACC = mul_hi16(Rsrc1, Rsrc2); }
+:MULLO	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=1 & Rsrc2 { ACC = mul_lo16(Rsrc1, Rsrc2); }
+:MULWHI	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=2 & Rsrc2 { ACC = sext(Rsrc1) * sext(Rsrc2 s>> 16); }
+:MULWLO	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=3 & Rsrc2 { ACC = sext(Rsrc1) * sext((Rsrc2 << 16) s>> 16); }
+:MACHI	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=4 & Rsrc2 { ACC = ACC + mul_hi16(Rsrc1, Rsrc2); }
+:MACLO	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=5 & Rsrc2 { ACC = ACC + mul_lo16(Rsrc1, Rsrc2); }
+:MACWHI	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=6 & Rsrc2 { ACC = ACC + sext(Rsrc1) * sext(Rsrc2 s>> 16); }
+:MACWLO	Rsrc1, Rsrc2	is op1=3 & Rsrc1; op3=7 & Rsrc2 { ACC = ACC + sext(Rsrc1) * sext((Rsrc2 << 16) s>> 16); }
+:RACH			is op12=0x50; op34=0x80 { ACC = round_acc(ACC, 1:1); }
+:RAC			is op12=0x50; op34=0x90 { ACC = round_acc(ACC, 0:1); }
+:MVFACHI	Rdest	is op1=5 & Rdest; op34=0xF0 { local t:8 = ACC >> 32; Rdest = t:4; }
+:MVFACLO	Rdest	is op1=5 & Rdest; op34=0xF1 { Rdest = ACC:4; }
+:MVFACMI	Rdest	is op1=5 & Rdest; op34=0xF2 { local t:8 = ACC >> 16; Rdest = t:4; }
+:MVTACHI	Rsrc1	is op1=5 & Rsrc1; op34=0x70 { ACC = (ACC & 0xFFFFFFFF) | (sext(Rsrc1) << 32); }
+:MVTACLO	Rsrc1	is op1=5 & Rsrc1; op34=0x71 { ACC = (ACC & 0xFFFFFFFF00000000) | zext(Rsrc1); }
